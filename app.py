@@ -67,9 +67,8 @@ def records(active_mid, recorder_mid=None):
 def render_record(r,dark,prefix,active_mid):
     created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
     with st.container(border=True, key=f'{prefix}_record_{r.id}'):
-        # 上段は情報だけ。下段の操作ボタンと分離して、重なりを防止する。
         icon_col, text_col, amount_col = st.columns(
-            [0.9, 4.7, 2.15], gap='xsmall', vertical_alignment='top', wrap=False
+            [0.48, 5.15, 2.25], gap='xsmall', vertical_alignment='top', wrap=False
         )
         icon_col.markdown(
             f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',
@@ -93,23 +92,28 @@ def render_record(r,dark,prefix,active_mid):
             unsafe_allow_html=True,
         )
 
-        # 下段は操作専用。レコード情報と重ならない。
+        # 操作は小さなテキストボタンにして、記録内容を主役にする。
         like_col, delete_col, spacer_col = st.columns(
-            [1.55, 0.9, 4.85], gap='xsmall', vertical_alignment='center', wrap=False
+            [0.9, 0.55, 6.45], gap='xxsmall', vertical_alignment='center', wrap=False
         )
         liked=bool(r.is_liked)
         label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
         if like_col.button(
             label,
             key=f'{prefix}_like_{r.id}',
-            type='primary' if liked else 'secondary',
-            width='stretch',
+            type='tertiary',
+            width='content',
         ):
             toggle_member_like(int(r.id),active_mid)
             st.rerun()
-        with delete_col.popover('🗑️', width='stretch'):
+        with delete_col.popover('🗑', width='content'):
             st.caption('この記録を削除しますか？')
-            if st.button('削除',key=f'{prefix}_del_{r.id}',type='primary',width='stretch'):
+            if st.button(
+                '削除',
+                key=f'{prefix}_del_{r.id}',
+                type='tertiary',
+                width='content',
+            ):
                 delete_saving(int(r.id))
                 st.rerun()
 
@@ -131,19 +135,20 @@ st.markdown(f'''<style>
 [data-testid="stHeader"]{{background:rgba(251,250,248,.96)}}
 .sticky{{position:sticky;top:2.75rem;z-index:90;background:var(--main);padding:16px 18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}
 .big{{font-size:2rem;font-weight:900}} .pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}
-.record-icon{{background:var(--soft);border-radius:9px;font-size:1.55rem;padding:9px 4px;text-align:center;min-width:38px}}
+.record-icon{{background:var(--soft);border-radius:7px;font-size:1.25rem;padding:7px 2px;text-align:center;width:28px;min-width:28px;line-height:1.1}}
 .member-selector-spacer{{height:.45rem}}
 .member-selector-label{{font-size:.86rem;font-weight:800;color:#555;white-space:nowrap}}
-.record-title{{font-weight:900;line-height:1.2;overflow-wrap:anywhere}} .muted{{color:#999;font-size:.75rem;line-height:1.25;margin-top:3px;overflow-wrap:anywhere}}
+.record-title{{font-weight:900;line-height:1.3;overflow-wrap:anywhere;word-break:break-word}} .muted{{color:#999;font-size:.75rem;line-height:1.35;margin-top:3px;overflow-wrap:anywhere;word-break:break-word}}
 .amount{{font-weight:900;text-align:right;white-space:nowrap;font-size:1rem}} div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}
 .stFormSubmitButton button{{background:var(--dark)!important;color:white!important;border-color:var(--dark)!important;font-weight:900!important}}
 .stFormSubmitButton button:hover{{background:var(--main)!important;border-color:var(--main)!important;color:white!important}}
 div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [data-testid="stVerticalBlock"]{{gap:.45rem}}
 @media (max-width:640px){{
 .block-container{{padding-top:3.9rem;padding-left:.7rem;padding-right:.7rem}} .sticky{{top:3.55rem;padding:12px 14px}}
-.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.45rem;padding:10px 3px;min-width:38px;min-height:40px}}
-.record-title{{font-size:.9rem;line-height:1.35}} .muted{{font-size:.69rem;line-height:1.35}} .record-meta{{padding-top:4px;padding-bottom:5px}} .amount{{font-size:.86rem;line-height:1.2;white-space:nowrap;word-break:keep-all;overflow:visible}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
+.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.1rem;padding:6px 1px;width:24px;min-width:24px;min-height:26px}}
+.record-title{{font-size:.9rem;line-height:1.4;overflow:visible}} .muted{{font-size:.7rem;line-height:1.45;overflow:visible}} .record-meta{{padding-top:5px;padding-bottom:8px}} .amount{{font-size:.82rem;line-height:1.2;white-space:nowrap;word-break:keep-all;overflow:visible}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
 div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}} .member-selector-label{{font-size:.78rem}}
+.st-key-recent_record_0 button{{min-height:1.7rem}}
 }}
 </style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
 st.markdown('<div class="member-selector-spacer"></div>',unsafe_allow_html=True)
