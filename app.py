@@ -59,34 +59,67 @@ def records(active_mid):
       GROUP BY s.id ORDER BY s.created_at DESC,s.id DESC''',(active_mid,))
 def render_record(r,dark,prefix,active_mid):
     created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
-    with st.container(border=True):
-        a,b,c=st.columns([.8,4.6,1.8],vertical_alignment='center')
-        a.markdown(f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',unsafe_allow_html=True)
-        b.markdown(f'<div class="record-title">{esc(r.title)}</div>',unsafe_allow_html=True)
-        if r.memo:b.markdown(f'<div class="muted">{esc(r.memo)}</div>',unsafe_allow_html=True)
-        b.markdown(f'<div class="muted">{esc(r.member_name)} ・ {created}</div>',unsafe_allow_html=True)
-        c.markdown(f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',unsafe_allow_html=True)
-        liked=bool(r.is_liked); label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
-        if c.button(label,key=f'{prefix}_like_{r.id}',type='primary' if liked else 'secondary',width='stretch'):
+    with st.container(border=True, key=f'{prefix}_record_{r.id}'):
+        icon_col, text_col, amount_col = st.columns(
+            [0.72, 4.5, 1.7], gap='xsmall', vertical_alignment='center', wrap=False
+        )
+        icon_col.markdown(f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',unsafe_allow_html=True)
+        text_col.markdown(f'<div class="record-title">{esc(r.title)}</div>',unsafe_allow_html=True)
+        if r.memo:
+            text_col.markdown(f'<div class="muted">{esc(r.memo)}</div>',unsafe_allow_html=True)
+        text_col.markdown(f'<div class="muted">{esc(r.member_name)} ・ {created}</div>',unsafe_allow_html=True)
+        amount_col.markdown(f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',unsafe_allow_html=True)
+        like_col, delete_col, spacer_col = st.columns(
+            [1.55, 0.85, 4.6], gap='xsmall', vertical_alignment='center', wrap=False
+        )
+        liked=bool(r.is_liked)
+        label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
+        if like_col.button(label,key=f'{prefix}_like_{r.id}',type='primary' if liked else 'secondary',width='stretch'):
             toggle_member_like(int(r.id),active_mid); st.rerun()
-        with c.popover('•••',width='stretch'):
-            if st.button('削除を確定',key=f'{prefix}_del_{r.id}',width='stretch'):
+        with delete_col.popover('🗑️', width='stretch'):
+            st.caption('この記録を削除しますか？')
+            if st.button('削除',key=f'{prefix}_del_{r.id}',type='primary',width='stretch'):
                 delete_saving(int(r.id)); st.rerun()
 
-init_db(); members=df('SELECT id,name FROM members ORDER BY id'); ids=[int(x) for x in members.id]
-if st.session_state.get('active_member_id') not in ids:st.session_state.active_member_id=ids[0]
+
+init_db()
+members=df('SELECT id,name FROM members ORDER BY id')
+ids=[int(x) for x in members.id]
+if st.session_state.get('active_member_id') not in ids:
+    st.session_state.active_member_id=ids[0]
+theme_name=setting('theme','セージ')
+main,dark,soft=THEMES.get(theme_name,THEMES['セージ'])
+now=datetime.now(JST)
+ms=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0).isoformat()
+ts=now.replace(hour=0,minute=0,second=0,microsecond=0).isoformat()
+sumrow=df('SELECT COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) month_total,COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) today_total FROM savings',(ms,ts)).iloc[0]
+st.markdown(f'''<style>
+:root{{--main:{main};--dark:{dark};--soft:{soft}}}
+.block-container{{max-width:780px;padding-top:2.8rem;padding-bottom:3rem}}
+[data-testid="stHeader"]{{background:rgba(251,250,248,.96)}}
+.sticky{{position:sticky;top:2.75rem;z-index:90;background:var(--main);padding:16px 18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}
+.big{{font-size:2rem;font-weight:900}} .pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}
+.record-icon{{background:var(--soft);border-radius:9px;font-size:1.55rem;padding:9px 4px;text-align:center;min-width:38px}}
+.record-title{{font-weight:900;line-height:1.2;overflow-wrap:anywhere}} .muted{{color:#999;font-size:.75rem;line-height:1.25;margin-top:3px;overflow-wrap:anywhere}}
+.amount{{font-weight:900;text-align:right;white-space:nowrap;font-size:1rem}} div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}
+.stFormSubmitButton button{{background:var(--dark)!important;color:white!important;border-color:var(--dark)!important;font-weight:900!important}}
+.stFormSubmitButton button:hover{{background:var(--main)!important;border-color:var(--main)!important;color:white!important}}
+div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [data-testid="stVerticalBlock"]{{gap:.45rem}}
+@media (max-width:640px){{
+.block-container{{padding-top:3.9rem;padding-left:.7rem;padding-right:.7rem}} .sticky{{top:3.55rem;padding:12px 14px}}
+.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.4rem;padding:8px 2px;min-width:34px}}
+.record-title{{font-size:.9rem}} .muted{{font-size:.68rem}} .amount{{font-size:.9rem}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
+div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}}
+}}
+</style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
 active_mid=st.selectbox('現在のメンバー',ids,index=ids.index(st.session_state.active_member_id),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0],key='active_member_id')
 name=members.loc[members.id==active_mid,'name'].iloc[0]
-theme_name=setting('theme','セージ'); main,dark,soft=THEMES.get(theme_name,THEMES['セージ'])
-now=datetime.now(JST); ms=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0).isoformat(); ts=now.replace(hour=0,minute=0,second=0,microsecond=0).isoformat()
-sumrow=df('SELECT COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) month_total,COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) today_total FROM savings',(ms,ts)).iloc[0]
-st.markdown(f'''<style>:root{{--main:{main};--dark:{dark};--soft:{soft}}}.block-container{{max-width:780px;padding-top:.5rem}}.sticky{{position:sticky;top:.5rem;z-index:99;background:var(--main);padding:18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}.big{{font-size:2rem;font-weight:900}}.pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}.record-icon{{background:var(--soft);border-radius:9px;font-size:1.6rem;padding:10px;text-align:center}}.record-title{{font-weight:900}}.muted{{color:#999;font-size:.78rem;margin-top:3px}}.amount{{font-weight:900;text-align:right;margin-bottom:5px}}div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}</style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
-st.caption(f'現在のメンバー：{name} ｜ いいねはメンバーごとにON／OFFされます')
+st.caption(f'現在のメンバー：{name}')
 home,history,settings=st.tabs(['🌱 直近の記録','🗓️ 月別の履歴','⚙️ 設定'])
 with home:
     with st.form('saving_form',clear_on_submit=True):
-        c1,c2=st.columns(2); genre=c1.selectbox('ジャンル',list(GENRES),format_func=lambda x:f'{GENRES[x]} {x}'); recorder=c2.selectbox('記録したメンバー',ids,index=ids.index(active_mid),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0])
-        title=st.text_input('節約したもの'); memo=st.text_area('メモ'); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
+        c1,c2=st.columns(2, gap='xsmall', wrap=False); genre=c1.selectbox('ジャンル',list(GENRES),format_func=lambda x:f'{GENRES[x]} {x}'); recorder=c2.selectbox('記録したメンバー',ids,index=ids.index(active_mid),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0])
+        title=st.text_input('節約したもの'); memo=st.text_area('メモ',height=68); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
         if st.form_submit_button('＋ 記録する',width='stretch'):
             if not title.strip():st.error('「節約したもの」を入力してね。')
             elif amount is None:st.error('節約した金額を入力してね。')
