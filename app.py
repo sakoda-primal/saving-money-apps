@@ -66,22 +66,22 @@ def records(active_mid, recorder_mid=None):
     return df(sql,tuple(params))
 def render_record(r,dark,prefix,active_mid):
     created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
+    # HTML文字列をMarkdownへ渡さず、純HTMLとして描画する。
+    # これにより、インデントやメモ有無によるMarkdownのコードブロック化を防ぐ。
     memo_html=(f'<div class="record-memo">{esc(r.memo)}</div>' if r.memo else '')
+    record_html=(
+        '<div class="record-grid">'
+        f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>'
+        '<div class="record-copy">'
+        f'<div class="record-title">{esc(r.title)}</div>'
+        f'{memo_html}'
+        f'<div class="record-meta">{esc(r.member_name)}<br>{created}</div>'
+        '</div>'
+        f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>'
+        '</div>'
+    )
     with st.container(border=True, key=f'{prefix}_record_{r.id}'):
-        # HTMLグリッドで幅を厳密に管理し、スマホでも横スクロールを発生させない。
-        st.markdown(
-            f'''<div class="record-grid">
-              <div class="record-icon">{GENRES.get(r.genre,"✨")}</div>
-              <div class="record-copy">
-                <div class="record-title">{esc(r.title)}</div>
-                {memo_html}
-                <div class="record-meta">{esc(r.member_name)}<br>{created}</div>
-              </div>
-              <div class="amount" style="color:{dark}">+{money(r.amount)}</div>
-            </div>''',
-            unsafe_allow_html=True,
-        )
-        # 操作は小さく下段へ。本文の高さ・幅に干渉させない。
+        st.html(record_html)
         like_col, delete_col, spacer_col = st.columns(
             [0.78, 0.42, 6.8], gap=None, vertical_alignment='center', wrap=False
         )
