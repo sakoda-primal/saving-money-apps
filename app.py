@@ -66,54 +66,33 @@ def records(active_mid, recorder_mid=None):
     return df(sql,tuple(params))
 def render_record(r,dark,prefix,active_mid):
     created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
+    memo_html=(f'<div class="record-memo">{esc(r.memo)}</div>' if r.memo else '')
     with st.container(border=True, key=f'{prefix}_record_{r.id}'):
-        icon_col, text_col, amount_col = st.columns(
-            [0.48, 5.15, 2.25], gap='xsmall', vertical_alignment='top', wrap=False
-        )
-        icon_col.markdown(
-            f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',
+        # HTMLグリッドで幅を厳密に管理し、スマホでも横スクロールを発生させない。
+        st.markdown(
+            f'''<div class="record-grid">
+              <div class="record-icon">{GENRES.get(r.genre,"✨")}</div>
+              <div class="record-copy">
+                <div class="record-title">{esc(r.title)}</div>
+                {memo_html}
+                <div class="record-meta">{esc(r.member_name)}<br>{created}</div>
+              </div>
+              <div class="amount" style="color:{dark}">+{money(r.amount)}</div>
+            </div>''',
             unsafe_allow_html=True,
         )
-        text_col.markdown(
-            f'<div class="record-title">{esc(r.title)}</div>',
-            unsafe_allow_html=True,
-        )
-        if r.memo:
-            text_col.markdown(
-                f'<div class="muted record-memo">{esc(r.memo)}</div>',
-                unsafe_allow_html=True,
-            )
-        text_col.markdown(
-            f'<div class="muted record-meta">{esc(r.member_name)}<br>{created}</div>',
-            unsafe_allow_html=True,
-        )
-        amount_col.markdown(
-            f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',
-            unsafe_allow_html=True,
-        )
-
-        # 操作は小さなテキストボタンにして、記録内容を主役にする。
+        # 操作は小さく下段へ。本文の高さ・幅に干渉させない。
         like_col, delete_col, spacer_col = st.columns(
-            [0.9, 0.55, 6.45], gap='xxsmall', vertical_alignment='center', wrap=False
+            [0.78, 0.42, 6.8], gap=None, vertical_alignment='center', wrap=False
         )
         liked=bool(r.is_liked)
         label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
-        if like_col.button(
-            label,
-            key=f'{prefix}_like_{r.id}',
-            type='tertiary',
-            width='content',
-        ):
+        if like_col.button(label,key=f'{prefix}_like_{r.id}',type='tertiary',width='content'):
             toggle_member_like(int(r.id),active_mid)
             st.rerun()
-        with delete_col.popover('🗑', width='content'):
+        with delete_col.popover('🗑',width='content'):
             st.caption('この記録を削除しますか？')
-            if st.button(
-                '削除',
-                key=f'{prefix}_del_{r.id}',
-                type='tertiary',
-                width='content',
-            ):
+            if st.button('削除',key=f'{prefix}_del_{r.id}',type='tertiary',width='content'):
                 delete_saving(int(r.id))
                 st.rerun()
 
@@ -128,14 +107,21 @@ main,dark,soft=THEMES.get(theme_name,THEMES['セージ'])
 now=datetime.now(JST)
 ms=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0).isoformat()
 ts=now.replace(hour=0,minute=0,second=0,microsecond=0).isoformat()
-sumrow=df('SELECT COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) month_total,COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) today_total FROM savings',(ms,ts)).iloc[0]
+dashboard_mid=int(st.session_state.active_member_id)
+sumrow=df('SELECT COALESCE(SUM(CASE WHEN created_at>=? AND member_id=? THEN amount ELSE 0 END),0) month_total,COALESCE(SUM(CASE WHEN created_at>=? AND member_id=? THEN amount ELSE 0 END),0) today_total FROM savings',(ms,dashboard_mid,ts,dashboard_mid)).iloc[0]
 st.markdown(f'''<style>
 :root{{--main:{main};--dark:{dark};--soft:{soft}}}
 .block-container{{max-width:780px;padding-top:2.8rem;padding-bottom:3rem}}
 [data-testid="stHeader"]{{background:rgba(251,250,248,.96)}}
 .sticky{{position:sticky;top:2.75rem;z-index:90;background:var(--main);padding:16px 18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}
 .big{{font-size:2rem;font-weight:900}} .pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}
-.record-icon{{background:var(--soft);border-radius:7px;font-size:1.25rem;padding:7px 2px;text-align:center;width:28px;min-width:28px;line-height:1.1}}
+.record-grid{{display:grid;grid-template-columns:38px minmax(0,1fr) max-content;column-gap:9px;align-items:start;width:100%;min-width:0;padding:5px 0 9px;overflow:visible}}
+.record-icon{{width:36px;height:36px;background:var(--soft);border-radius:8px;font-size:18px;line-height:36px;text-align:center;overflow:hidden}}
+.record-copy{{min-width:0;padding-right:2px}}
+.record-title{{font-weight:900;line-height:1.35;overflow-wrap:anywhere;word-break:break-word}}
+.record-memo{{color:#999;font-size:.75rem;line-height:1.4;margin-top:4px;overflow-wrap:anywhere;word-break:break-word}}
+.record-meta{{color:#999;font-size:.72rem;line-height:1.45;margin-top:6px;padding-bottom:3px;overflow:visible}}
+.amount{{font-weight:900;text-align:right;white-space:nowrap;font-size:.9rem;line-height:1.3;padding-top:1px}}
 .member-selector-spacer{{height:.45rem}}
 .member-selector-label{{font-size:.86rem;font-weight:800;color:#555;white-space:nowrap}}
 .record-title{{font-weight:900;line-height:1.3;overflow-wrap:anywhere;word-break:break-word}} .muted{{color:#999;font-size:.75rem;line-height:1.35;margin-top:3px;overflow-wrap:anywhere;word-break:break-word}}
@@ -145,8 +131,7 @@ st.markdown(f'''<style>
 div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [data-testid="stVerticalBlock"]{{gap:.45rem}}
 @media (max-width:640px){{
 .block-container{{padding-top:3.9rem;padding-left:.7rem;padding-right:.7rem}} .sticky{{top:3.55rem;padding:12px 14px}}
-.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.1rem;padding:6px 1px;width:24px;min-width:24px;min-height:26px}}
-.record-title{{font-size:.9rem;line-height:1.4;overflow:visible}} .muted{{font-size:.7rem;line-height:1.45;overflow:visible}} .record-meta{{padding-top:5px;padding-bottom:8px}} .amount{{font-size:.82rem;line-height:1.2;white-space:nowrap;word-break:keep-all;overflow:visible}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
+.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-grid{{grid-template-columns:38px minmax(0,1fr) max-content;column-gap:7px;padding:7px 0 10px}} .record-icon{{width:36px;height:36px;font-size:18px;line-height:36px}} .record-title{{font-size:.88rem}} .record-memo{{font-size:.7rem}} .record-meta{{font-size:.68rem;line-height:1.5;margin-top:7px;padding-bottom:5px}} .amount{{font-size:.78rem}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
 div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}} .member-selector-label{{font-size:.78rem}}
 .st-key-recent_record_0 button{{min-height:1.7rem}}
 }}
