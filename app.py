@@ -132,6 +132,7 @@ st.markdown(f'''<style>
 .sticky{{position:sticky;top:2.75rem;z-index:90;background:var(--main);padding:16px 18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}
 .big{{font-size:2rem;font-weight:900}} .pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}
 .record-icon{{background:var(--soft);border-radius:9px;font-size:1.55rem;padding:9px 4px;text-align:center;min-width:38px}}
+.member-selector-spacer{{height:.45rem}}
 .member-selector-label{{font-size:.86rem;font-weight:800;color:#555;white-space:nowrap}}
 .record-title{{font-weight:900;line-height:1.2;overflow-wrap:anywhere}} .muted{{color:#999;font-size:.75rem;line-height:1.25;margin-top:3px;overflow-wrap:anywhere}}
 .amount{{font-weight:900;text-align:right;white-space:nowrap;font-size:1rem}} div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}
@@ -145,6 +146,7 @@ div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [d
 div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}} .member-selector-label{{font-size:.78rem}}
 }}
 </style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
+st.markdown('<div class="member-selector-spacer"></div>',unsafe_allow_html=True)
 member_label_col, member_select_col = st.columns(
     [1.05, 2.15], gap='xsmall', vertical_alignment='center', wrap=False
 )
@@ -161,12 +163,32 @@ name=members.loc[members.id==active_mid,'name'].iloc[0]
 home,history,settings=st.tabs(['🌱 直近の記録','🗓️ 月別の履歴','⚙️ 設定'])
 with home:
     with st.form('saving_form',clear_on_submit=True):
-        c1,c2=st.columns(2, gap='xsmall', wrap=False); genre=c1.selectbox('ジャンル',list(GENRES),format_func=lambda x:f'{GENRES[x]} {x}'); recorder=c2.selectbox('記録したメンバー',ids,index=ids.index(active_mid),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0])
-        title=st.text_input('節約したもの'); memo=st.text_input('メモ',placeholder='任意'); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
+        genre_col, title_col = st.columns(
+            [1.05, 2.95], gap='xsmall', vertical_alignment='bottom', wrap=False
+        )
+        genre=genre_col.selectbox(
+            'ジャンル',
+            list(GENRES),
+            format_func=lambda x:f'{GENRES[x]} {x}',
+        )
+        title=title_col.text_input('節約したもの')
+        memo=st.text_input('メモ',placeholder='任意')
+        amount=st.number_input(
+            'いくら節約した？',
+            min_value=1,
+            max_value=10_000_000,
+            value=None,
+            step=100,
+            placeholder='金額を入力',
+        )
         if st.form_submit_button('＋ 記録する',width='stretch'):
-            if not title.strip():st.error('「節約したもの」を入力してね。')
-            elif amount is None:st.error('節約した金額を入力してね。')
-            else:add_saving(genre,title,memo,amount,recorder); st.rerun()
+            if not title.strip():
+                st.error('「節約したもの」を入力してね。')
+            elif amount is None:
+                st.error('節約した金額を入力してね。')
+            else:
+                add_saving(genre,title,memo,amount,active_mid)
+                st.rerun()
     data=records(active_mid, recorder_mid=active_mid).head(8)
     if data.empty:st.info('まだ記録がありません。')
     for _,r in data.iterrows():render_record(r,dark,'recent',active_mid)
