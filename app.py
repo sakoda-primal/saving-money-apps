@@ -29,7 +29,9 @@ def init_db():
           FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE
         );''')
         now=datetime.now(JST).isoformat(timespec='seconds')
-        c.execute('INSERT OR IGNORE INTO members(name,created_at) VALUES(?,?)',('わたし',now))
+        member_count=c.execute('SELECT COUNT(*) AS n FROM members').fetchone()['n']
+        if member_count == 0:
+            c.execute('INSERT INTO members(name,created_at) VALUES(?,?)',('わたし',now))
         c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('theme','セージ')")
 
 def df(sql,params=()):
@@ -130,6 +132,7 @@ st.markdown(f'''<style>
 .sticky{{position:sticky;top:2.75rem;z-index:90;background:var(--main);padding:16px 18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}
 .big{{font-size:2rem;font-weight:900}} .pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}
 .record-icon{{background:var(--soft);border-radius:9px;font-size:1.55rem;padding:9px 4px;text-align:center;min-width:38px}}
+.member-selector-label{{font-size:.86rem;font-weight:800;color:#555;white-space:nowrap}}
 .record-title{{font-weight:900;line-height:1.2;overflow-wrap:anywhere}} .muted{{color:#999;font-size:.75rem;line-height:1.25;margin-top:3px;overflow-wrap:anywhere}}
 .amount{{font-weight:900;text-align:right;white-space:nowrap;font-size:1rem}} div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}
 .stFormSubmitButton button{{background:var(--dark)!important;color:white!important;border-color:var(--dark)!important;font-weight:900!important}}
@@ -139,10 +142,21 @@ div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [d
 .block-container{{padding-top:3.9rem;padding-left:.7rem;padding-right:.7rem}} .sticky{{top:3.55rem;padding:12px 14px}}
 .big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.45rem;padding:10px 3px;min-width:38px;min-height:40px}}
 .record-title{{font-size:.9rem;line-height:1.35}} .muted{{font-size:.69rem;line-height:1.35}} .record-meta{{padding-top:4px;padding-bottom:5px}} .amount{{font-size:.86rem;line-height:1.2;white-space:nowrap;word-break:keep-all;overflow:visible}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
-div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}}
+div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}} .member-selector-label{{font-size:.78rem}}
 }}
 </style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
-active_mid=st.selectbox('現在のメンバー',ids,index=ids.index(st.session_state.active_member_id),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0],key='active_member_id')
+member_label_col, member_select_col = st.columns(
+    [1.05, 2.15], gap='xsmall', vertical_alignment='center', wrap=False
+)
+member_label_col.markdown('<div class="member-selector-label">現在のメンバー</div>',unsafe_allow_html=True)
+active_mid=member_select_col.selectbox(
+    '現在のメンバー',
+    ids,
+    index=ids.index(st.session_state.active_member_id),
+    format_func=lambda x:members.loc[members.id==x,'name'].iloc[0],
+    key='active_member_id',
+    label_visibility='collapsed',
+)
 name=members.loc[members.id==active_mid,'name'].iloc[0]
 home,history,settings=st.tabs(['🌱 直近の記録','🗓️ 月別の履歴','⚙️ 設定'])
 with home:
