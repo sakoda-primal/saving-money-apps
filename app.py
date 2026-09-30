@@ -1,306 +1,126 @@
 from __future__ import annotations
-
-import html
-import sqlite3
+import html, sqlite3
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
-
 import pandas as pd
 import streamlit as st
 
-APP_DIR = Path(__file__).resolve().parent
-DB_PATH = APP_DIR / "savings.db"
-JST = ZoneInfo("Asia/Tokyo")
+DB_PATH=Path(__file__).with_name('savings.db'); JST=ZoneInfo('Asia/Tokyo')
+THEMES={'セージ':('#9EAD9A','#566A5B','#EEF2ED'),'ダスティブルー':('#91A8B8','#4D6574','#ECF2F5'),'モーヴ':('#B39AAF','#725C6E','#F4EEF3'),'テラコッタ':('#C98F7A','#835847','#F8EFEB'),'サンド':('#C4AD8D','#74634D','#F7F2EB'),'スモーキーミント':('#86AAA0','#456B61','#EAF3F1')}
+GENRES={'食費':'🍳','外食':'☕','買い物':'🛍️','交通':'🚃','光熱費':'💡','通信':'📱','趣味':'🎮','美容・健康':'🌿','子ども':'🧸','その他':'✨'}
+st.set_page_config(page_title='ういた！',page_icon='🌱',layout='centered')
 
-THEMES = {
-    "セージ": {"main": "#9EAD9A", "dark": "#566A5B", "soft": "#EEF2ED"},
-    "ダスティブルー": {"main": "#91A8B8", "dark": "#4D6574", "soft": "#ECF2F5"},
-    "モーヴ": {"main": "#B39AAF", "dark": "#725C6E", "soft": "#F4EEF3"},
-    "テラコッタ": {"main": "#C98F7A", "dark": "#835847", "soft": "#F8EFEB"},
-    "サンド": {"main": "#C4AD8D", "dark": "#74634D", "soft": "#F7F2EB"},
-    "スモーキーミント": {"main": "#86AAA0", "dark": "#456B61", "soft": "#EAF3F1"},
-}
+def conn():
+    c=sqlite3.connect(DB_PATH,check_same_thread=False); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); return c
 
-GENRES = {
-    "食費": "🍳", "外食": "☕", "買い物": "🛍️", "交通": "🚃", "光熱費": "💡",
-    "通信": "📱", "趣味": "🎮", "美容・健康": "🌿", "子ども": "🧸", "その他": "✨",
-}
+def init_db():
+    with conn() as c:
+        c.executescript('''
+        CREATE TABLE IF NOT EXISTS members(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS savings(id INTEGER PRIMARY KEY AUTOINCREMENT,genre TEXT NOT NULL,title TEXT NOT NULL,memo TEXT NOT NULL DEFAULT '',amount INTEGER NOT NULL CHECK(amount>0),member_id INTEGER,created_at TEXT NOT NULL,likes INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(member_id) REFERENCES members(id));
+        CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS record_likes(
+          saving_id INTEGER NOT NULL,
+          member_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          PRIMARY KEY(saving_id,member_id),
+          FOREIGN KEY(saving_id) REFERENCES savings(id) ON DELETE CASCADE,
+          FOREIGN KEY(member_id) REFERENCES members(id) ON DELETE CASCADE
+        );''')
+        now=datetime.now(JST).isoformat(timespec='seconds')
+        c.execute('INSERT OR IGNORE INTO members(name,created_at) VALUES(?,?)',('わたし',now))
+        c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('theme','セージ')")
 
-st.set_page_config(page_title="ういた！", page_icon="🌱", layout="centered")
+def df(sql,params=()):
+    with conn() as c:return pd.read_sql_query(sql,c,params=params)
+def esc(x):return html.escape(str(x or ''))
+def money(x):return f'¥{int(x):,}'
+def setting(k,d):
+    with conn() as c:r=c.execute('SELECT value FROM settings WHERE key=?',(k,)).fetchone(); return r['value'] if r else d
+def set_setting(k,v):
+    with conn() as c:c.execute('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(k,v))
+def add_saving(g,t,m,a,mid):
+    with conn() as c:c.execute('INSERT INTO savings(genre,title,memo,amount,member_id,created_at) VALUES(?,?,?,?,?,?)',(g,t.strip(),m.strip(),int(a),mid,datetime.now(JST).isoformat(timespec='seconds')))
+def delete_saving(sid):
+    with conn() as c:c.execute('DELETE FROM record_likes WHERE saving_id=?',(sid,)); c.execute('DELETE FROM savings WHERE id=?',(sid,))
+def delete_member(mid):
+    with conn() as c:c.execute('DELETE FROM record_likes WHERE member_id=?',(mid,)); c.execute('UPDATE savings SET member_id=NULL WHERE member_id=?',(mid,)); c.execute('DELETE FROM members WHERE id=?',(mid,))
+def toggle_member_like(sid,mid):
+    with conn() as c:
+        hit=c.execute('SELECT 1 FROM record_likes WHERE saving_id=? AND member_id=?',(sid,mid)).fetchone()
+        if hit:c.execute('DELETE FROM record_likes WHERE saving_id=? AND member_id=?',(sid,mid))
+        else:c.execute('INSERT INTO record_likes(saving_id,member_id,created_at) VALUES(?,?,?)',(sid,mid,datetime.now(JST).isoformat(timespec='seconds')))
+def records(active_mid):
+    return df('''SELECT s.id,s.genre,s.title,s.memo,s.amount,s.created_at,COALESCE(m.name,'未設定') member_name,
+      COUNT(rl.member_id) like_count,
+      MAX(CASE WHEN rl.member_id=? THEN 1 ELSE 0 END) is_liked
+      FROM savings s LEFT JOIN members m ON s.member_id=m.id LEFT JOIN record_likes rl ON rl.saving_id=s.id
+      GROUP BY s.id ORDER BY s.created_at DESC,s.id DESC''',(active_mid,))
+def render_record(r,dark,prefix,active_mid):
+    created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
+    with st.container(border=True):
+        a,b,c=st.columns([.8,4.6,1.8],vertical_alignment='center')
+        a.markdown(f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',unsafe_allow_html=True)
+        b.markdown(f'<div class="record-title">{esc(r.title)}</div>',unsafe_allow_html=True)
+        if r.memo:b.markdown(f'<div class="muted">{esc(r.memo)}</div>',unsafe_allow_html=True)
+        b.markdown(f'<div class="muted">{esc(r.member_name)} ・ {created}</div>',unsafe_allow_html=True)
+        c.markdown(f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',unsafe_allow_html=True)
+        liked=bool(r.is_liked); label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
+        if c.button(label,key=f'{prefix}_like_{r.id}',type='primary' if liked else 'secondary',width='stretch'):
+            toggle_member_like(int(r.id),active_mid); st.rerun()
+        with c.popover('•••',width='stretch'):
+            if st.button('削除を確定',key=f'{prefix}_del_{r.id}',width='stretch'):
+                delete_saving(int(r.id)); st.rerun()
 
-
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db() -> None:
-    with get_connection() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS savings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                genre TEXT NOT NULL,
-                title TEXT NOT NULL,
-                memo TEXT NOT NULL DEFAULT '',
-                amount INTEGER NOT NULL CHECK(amount > 0),
-                member_id INTEGER,
-                created_at TEXT NOT NULL,
-                likes INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(member_id) REFERENCES members(id)
-            );
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            """
-        )
-        now = datetime.now(JST).isoformat(timespec="seconds")
-        conn.execute("INSERT OR IGNORE INTO members(name, created_at) VALUES (?, ?)", ("わたし", now))
-        conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES ('theme', 'セージ')")
-
-
-def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
-    with get_connection() as conn:
-        return pd.read_sql_query(sql, conn, params=params)
-
-
-def get_setting(key: str, default: str) -> str:
-    with get_connection() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else default
-
-
-def set_setting(key: str, value: str) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, value),
-        )
-
-
-def money(value: int) -> str:
-    return f"¥{int(value):,}"
-
-
-def e(value: object) -> str:
-    return html.escape(str(value or ""))
-
-
-def add_saving(genre: str, title: str, memo: str, amount: int, member_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO savings(genre, title, memo, amount, member_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (genre, title.strip(), memo.strip(), int(amount), member_id, datetime.now(JST).isoformat(timespec="seconds")),
-        )
-
-
-def like_saving(record_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute("UPDATE savings SET likes = likes + 1 WHERE id = ?", (record_id,))
-
-
-def delete_saving(record_id: int) -> None:
-    with get_connection() as conn:
-        conn.execute("DELETE FROM savings WHERE id = ?", (record_id,))
-
-
-def load_records(where: str = "", params: tuple = ()) -> pd.DataFrame:
-    sql = """
-        SELECT s.id, s.genre, s.title, s.memo, s.amount, s.created_at, s.likes,
-               COALESCE(m.name, '未設定') AS member_name
-        FROM savings s LEFT JOIN members m ON s.member_id = m.id
-    """
-    if where:
-        sql += " WHERE " + where
-    sql += " ORDER BY s.created_at DESC, s.id DESC"
-    return query_df(sql, params)
-
-
-def render_record(row: pd.Series, theme_dark: str, key_prefix: str) -> None:
-    icon = GENRES.get(row["genre"], "✨")
-    created = datetime.fromisoformat(row["created_at"]).astimezone(JST).strftime("%Y/%m/%d %H:%M")
-    memo_text = e(row["memo"]) if row["memo"] else "メモなし"
-    st.markdown(
-        f"""
-        <div class="record-card">
-          <div class="record-icon">{icon}</div>
-          <div class="record-body">
-            <div class="record-title">{e(row['title'])}</div>
-            <div class="record-memo">{memo_text}</div>
-            <div class="record-meta">{e(row['member_name'])} ・ {created} ・ {e(row['genre'])}</div>
-          </div>
-          <div class="record-amount" style="color:{theme_dark}">+{money(row['amount'])}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    c1, c2, c3 = st.columns([1.4, 1, 5])
-    if c1.button(f"♡ {int(row['likes'])}", key=f"{key_prefix}_like_{int(row['id'])}", use_container_width=True):
-        like_saving(int(row["id"]))
-        st.rerun()
-    with c2.popover("•••", use_container_width=True):
-        st.caption("この記録の操作")
-        if st.button("削除する", key=f"{key_prefix}_delete_{int(row['id'])}", type="secondary"):
-            delete_saving(int(row["id"]))
-            st.rerun()
-
-
-init_db()
-current_theme_name = get_setting("theme", "セージ")
-if current_theme_name not in THEMES:
-    current_theme_name = "セージ"
-theme = THEMES[current_theme_name]
-
-now = datetime.now(JST)
-month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
-today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-summary = query_df(
-    """
-    SELECT
-      COALESCE(SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END), 0) AS month_total,
-      COALESCE(SUM(CASE WHEN created_at >= ? THEN amount ELSE 0 END), 0) AS today_total
-    FROM savings
-    """,
-    (month_start, today_start),
-).iloc[0]
-
-st.markdown(
-    f"""
-    <style>
-      :root {{ --main:{theme['main']}; --dark:{theme['dark']}; --soft:{theme['soft']}; }}
-      .stApp {{ background:#FBFAF8; color:#29302D; }}
-      .block-container {{ max-width:780px; padding-top:0.5rem; padding-bottom:5rem; }}
-      [data-testid="stHeader"] {{ background:transparent; }}
-      .sticky-summary {{ position:sticky; top:0.5rem; z-index:999; background:var(--main); border-radius:24px;
-        padding:20px 22px; box-shadow:0 12px 30px rgba(48,55,51,.14); margin-bottom:18px; }}
-      .summary-grid {{ display:flex; align-items:center; justify-content:space-between; gap:20px; }}
-      .summary-label,.summary-foot {{ font-size:.78rem; font-weight:700; color:#fff; opacity:.95; }}
-      .summary-amount {{ font-size:2.25rem; line-height:1.1; font-weight:900; color:#fff; letter-spacing:-.04em; margin:4px 0; }}
-      .today-pill {{ white-space:nowrap; background:#fff; color:var(--dark); padding:12px 16px; border-radius:999px; font-weight:900; box-shadow:0 4px 12px rgba(0,0,0,.08); }}
-      .section-title {{ margin:18px 0 8px; font-size:1.15rem; font-weight:900; }}
-      .record-card {{ display:grid; grid-template-columns:58px minmax(0,1fr) auto; gap:14px; align-items:center; background:#fff;
-        border:1px solid #ECEAE6; border-radius:20px; padding:16px; margin-top:10px; box-shadow:0 5px 16px rgba(48,55,51,.055); }}
-      .record-icon {{ width:52px; height:52px; display:flex; align-items:center; justify-content:center; border-radius:17px; background:var(--soft); font-size:1.7rem; }}
-      .record-title {{ font-family:Arial,'Noto Sans JP',sans-serif; font-weight:900; font-size:1rem; color:#252B28; }}
-      .record-memo,.record-meta {{ font-family:Arial,'Noto Sans JP',sans-serif; color:#9A9D9B; font-size:.78rem; margin-top:3px; overflow-wrap:anywhere; }}
-      .record-amount {{ font-weight:900; font-size:1.05rem; white-space:nowrap; }}
-      div[data-testid="stForm"] {{ background:#fff; border:1px solid #ECEAE6; border-radius:22px; padding:10px 18px 18px; }}
-      .stButton > button, .stFormSubmitButton > button {{ border-radius:14px; font-weight:800; }}
-      .stFormSubmitButton > button {{ background:var(--dark); color:white; border:none; }}
-      @media (max-width:560px) {{
-        .block-container {{ padding-left:12px; padding-right:12px; }}
-        .sticky-summary {{ top:.25rem; border-radius:20px; padding:16px; }}
-        .summary-amount {{ font-size:1.85rem; }} .today-pill {{ padding:10px 12px; font-size:.82rem; }}
-        .record-card {{ grid-template-columns:50px minmax(0,1fr); }}
-        .record-icon {{ width:46px; height:46px; }} .record-amount {{ grid-column:2; margin-top:2px; }}
-      }}
-    </style>
-    <div class="sticky-summary">
-      <div class="summary-grid">
-        <div>
-          <div class="summary-label">今月</div>
-          <div class="summary-amount">{money(int(summary['month_total']))}</div>
-          <div class="summary-foot">浮いた！</div>
-        </div>
-        <div class="today-pill">本日 +{money(int(summary['today_total']))}</div>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-home_tab, history_tab, settings_tab = st.tabs(["🌱 直近の記録", "🗓️ 月別の履歴", "⚙️ 設定"])
-
-with home_tab:
-    st.markdown('<div class="section-title">節約を記録する</div>', unsafe_allow_html=True)
-    members = query_df("SELECT id, name FROM members ORDER BY id")
-    member_options = {row["name"]: int(row["id"]) for _, row in members.iterrows()}
-    with st.form("saving_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        genre = c1.selectbox("ジャンル", list(GENRES), format_func=lambda x: f"{GENRES[x]}  {x}")
-        member_name = c2.selectbox("記録したメンバー", list(member_options))
-        title = st.text_input("節約したもの", placeholder="例：コンビニを我慢してお弁当にした")
-        memo = st.text_area("メモ", placeholder="例：家族3人分のお昼代", height=80)
-        amount = st.number_input("いくら節約した？", min_value=1, max_value=10_000_000, value=300, step=100)
-        submitted = st.form_submit_button("＋ 記録する", use_container_width=True)
-        if submitted:
-            if not title.strip():
-                st.error("「節約したもの」を入力してね。")
-            else:
-                add_saving(genre, title, memo, int(amount), member_options[member_name])
-                st.success(f"{money(int(amount))} の節約を記録したよ！")
+init_db(); members=df('SELECT id,name FROM members ORDER BY id'); ids=[int(x) for x in members.id]
+if st.session_state.get('active_member_id') not in ids:st.session_state.active_member_id=ids[0]
+active_mid=st.selectbox('現在のメンバー',ids,index=ids.index(st.session_state.active_member_id),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0],key='active_member_id')
+name=members.loc[members.id==active_mid,'name'].iloc[0]
+theme_name=setting('theme','セージ'); main,dark,soft=THEMES.get(theme_name,THEMES['セージ'])
+now=datetime.now(JST); ms=now.replace(day=1,hour=0,minute=0,second=0,microsecond=0).isoformat(); ts=now.replace(hour=0,minute=0,second=0,microsecond=0).isoformat()
+sumrow=df('SELECT COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) month_total,COALESCE(SUM(CASE WHEN created_at>=? THEN amount ELSE 0 END),0) today_total FROM savings',(ms,ts)).iloc[0]
+st.markdown(f'''<style>:root{{--main:{main};--dark:{dark};--soft:{soft}}}.block-container{{max-width:780px;padding-top:.5rem}}.sticky{{position:sticky;top:.5rem;z-index:99;background:var(--main);padding:18px;border-radius:14px;color:white;display:flex;justify-content:space-between;align-items:center;box-shadow:0 8px 20px #0002}}.big{{font-size:2rem;font-weight:900}}.pill{{background:white;color:var(--dark);padding:10px 14px;border-radius:8px;font-weight:800}}.record-icon{{background:var(--soft);border-radius:9px;font-size:1.6rem;padding:10px;text-align:center}}.record-title{{font-weight:900}}.muted{{color:#999;font-size:.78rem;margin-top:3px}}.amount{{font-weight:900;text-align:right;margin-bottom:5px}}div[data-testid="stVerticalBlockBorderWrapper"]{{border-radius:10px}}</style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
+st.caption(f'現在のメンバー：{name} ｜ いいねはメンバーごとにON／OFFされます')
+home,history,settings=st.tabs(['🌱 直近の記録','🗓️ 月別の履歴','⚙️ 設定'])
+with home:
+    with st.form('saving_form',clear_on_submit=True):
+        c1,c2=st.columns(2); genre=c1.selectbox('ジャンル',list(GENRES),format_func=lambda x:f'{GENRES[x]} {x}'); recorder=c2.selectbox('記録したメンバー',ids,index=ids.index(active_mid),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0])
+        title=st.text_input('節約したもの'); memo=st.text_area('メモ'); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
+        if st.form_submit_button('＋ 記録する',width='stretch'):
+            if not title.strip():st.error('「節約したもの」を入力してね。')
+            elif amount is None:st.error('節約した金額を入力してね。')
+            else:add_saving(genre,title,memo,amount,recorder); st.rerun()
+    data=records(active_mid).head(8)
+    if data.empty:st.info('まだ記録がありません。')
+    for _,r in data.iterrows():render_record(r,dark,'recent',active_mid)
+with history:
+    data=records(active_mid)
+    if data.empty:st.info('記録を追加すると表示されます。')
+    else:
+        data['month']=pd.to_datetime(data.created_at).dt.strftime('%Y年%m月'); month=st.selectbox('表示する月',list(data.month.drop_duplicates())); monthly=data[data.month==month]; st.metric('この月に浮いた金額',money(monthly.amount.sum()))
+        for _,r in monthly.iterrows():render_record(r,dark,f'history_{month}',active_mid)
+with settings:
+    chosen=st.selectbox('テーマカラー',list(THEMES),index=list(THEMES).index(theme_name))
+    if st.button('この色に変更',width='stretch'):set_setting('theme',chosen); st.rerun()
+    st.divider(); st.subheader('共有メンバー')
+    member_rows=df('SELECT id,name FROM members ORDER BY id')
+    for _,m in member_rows.iterrows():
+        x,y,z=st.columns([4.8,1,1]); new=x.text_input('メンバー名',m['name'],key=f'mn_{m.id}',label_visibility='collapsed')
+        if y.button('保存',key=f'ms_{m.id}',width='stretch'):
+            try:
+                with conn() as c:c.execute('UPDATE members SET name=? WHERE id=?',(new.strip(),int(m.id)))
                 st.rerun()
-
-    st.markdown('<div class="section-title">直近の記録</div>', unsafe_allow_html=True)
-    recent = load_records().head(8)
-    if recent.empty:
-        st.info("まだ記録がありません。最初の『浮いた！』を登録してみよう 🌱")
-    else:
-        for _, record in recent.iterrows():
-            render_record(record, theme["dark"], "recent")
-
-with history_tab:
-    records = load_records()
-    if records.empty:
-        st.info("月別の履歴は、記録を追加すると表示されます。")
-    else:
-        records["month"] = pd.to_datetime(records["created_at"]).dt.strftime("%Y年%m月")
-        month_options = list(records["month"].drop_duplicates())
-        selected_month = st.selectbox("表示する月", month_options)
-        monthly = records[records["month"] == selected_month]
-        st.metric("この月に浮いた金額", money(int(monthly["amount"].sum())))
-        st.caption(f"{len(monthly)}件の記録")
-        for _, record in monthly.iterrows():
-            render_record(record, theme["dark"], f"history_{selected_month}")
-
-with settings_tab:
-    st.subheader("テーマカラー")
-    selected_theme = st.selectbox("好きなくすみカラーを選択", list(THEMES), index=list(THEMES).index(current_theme_name))
-    palette = THEMES[selected_theme]
-    st.markdown(
-        f'<div style="height:72px;border-radius:18px;background:{palette["main"]};display:flex;align-items:center;padding:0 20px;color:white;font-weight:900;">{e(selected_theme)} プレビュー</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("この色に変更", use_container_width=True):
-        set_setting("theme", selected_theme)
-        st.rerun()
-
-    st.divider()
-    st.subheader("共有メンバー")
-    member_rows = query_df("SELECT id, name FROM members ORDER BY id")
-    for _, member in member_rows.iterrows():
-        left, right = st.columns([5, 1])
-        new_name = left.text_input("メンバー名", value=member["name"], key=f"member_name_{member['id']}", label_visibility="collapsed")
-        if right.button("保存", key=f"member_save_{member['id']}"):
-            if new_name.strip():
-                try:
-                    with get_connection() as conn:
-                        conn.execute("UPDATE members SET name = ? WHERE id = ?", (new_name.strip(), int(member["id"])))
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("同じ名前のメンバーがいます。")
-
-    with st.form("add_member_form", clear_on_submit=True):
-        new_member = st.text_input("新しいメンバー", placeholder="例：パパ、ママ、子ども")
-        if st.form_submit_button("メンバーを追加", use_container_width=True):
-            if new_member.strip():
-                try:
-                    with get_connection() as conn:
-                        conn.execute(
-                            "INSERT INTO members(name, created_at) VALUES (?, ?)",
-                            (new_member.strip(), datetime.now(JST).isoformat(timespec="seconds")),
-                        )
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("同じ名前のメンバーがいます。")
-
-    st.divider()
-    st.caption("記録は app.py と同じフォルダの savings.db に保存されます。家族で共用する場合は、同じStreamlitサーバーへアクセスしてください。")
+            except sqlite3.IntegrityError:st.error('同じ名前のメンバーがいます。')
+        with z.popover('削除',width='stretch'):
+            if len(member_rows)<=1:st.caption('最後の1人は削除できません。')
+            else:
+                st.caption('過去の記録は残り、メンバー名は「未設定」になります。このメンバーのいいねは削除されます。')
+                if st.button('削除を確定',key=f'md_{m.id}',width='stretch'):delete_member(int(m.id)); st.session_state.pop('active_member_id',None); st.rerun()
+    with st.form('add_member',clear_on_submit=True):
+        new=st.text_input('新しいメンバー')
+        if st.form_submit_button('メンバーを追加',width='stretch') and new.strip():
+            try:
+                with conn() as c:c.execute('INSERT INTO members(name,created_at) VALUES(?,?)',(new.strip(),datetime.now(JST).isoformat(timespec='seconds')))
+                st.rerun()
+            except sqlite3.IntegrityError:st.error('同じ名前のメンバーがいます。')
