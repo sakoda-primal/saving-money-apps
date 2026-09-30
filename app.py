@@ -51,35 +51,65 @@ def toggle_member_like(sid,mid):
         hit=c.execute('SELECT 1 FROM record_likes WHERE saving_id=? AND member_id=?',(sid,mid)).fetchone()
         if hit:c.execute('DELETE FROM record_likes WHERE saving_id=? AND member_id=?',(sid,mid))
         else:c.execute('INSERT INTO record_likes(saving_id,member_id,created_at) VALUES(?,?,?)',(sid,mid,datetime.now(JST).isoformat(timespec='seconds')))
-def records(active_mid):
-    return df('''SELECT s.id,s.genre,s.title,s.memo,s.amount,s.created_at,COALESCE(m.name,'未設定') member_name,
+def records(active_mid, recorder_mid=None):
+    sql='''SELECT s.id,s.genre,s.title,s.memo,s.amount,s.created_at,COALESCE(m.name,'未設定') member_name,
       COUNT(rl.member_id) like_count,
       MAX(CASE WHEN rl.member_id=? THEN 1 ELSE 0 END) is_liked
       FROM savings s LEFT JOIN members m ON s.member_id=m.id LEFT JOIN record_likes rl ON rl.saving_id=s.id
-      GROUP BY s.id ORDER BY s.created_at DESC,s.id DESC''',(active_mid,))
+      GROUP BY s.id ORDER BY s.created_at DESC,s.id DESC'''
+    params=[active_mid]
+    if recorder_mid is not None:
+        sql=sql.replace('GROUP BY s.id', 'WHERE s.member_id=? GROUP BY s.id')
+        params.append(recorder_mid)
+    return df(sql,tuple(params))
 def render_record(r,dark,prefix,active_mid):
     created=datetime.fromisoformat(r.created_at).astimezone(JST).strftime('%Y/%m/%d %H:%M')
     with st.container(border=True, key=f'{prefix}_record_{r.id}'):
+        # 上段は情報だけ。下段の操作ボタンと分離して、重なりを防止する。
         icon_col, text_col, amount_col = st.columns(
-            [0.72, 4.5, 1.7], gap='xsmall', vertical_alignment='center', wrap=False
+            [0.9, 4.7, 2.15], gap='xsmall', vertical_alignment='top', wrap=False
         )
-        icon_col.markdown(f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',unsafe_allow_html=True)
-        text_col.markdown(f'<div class="record-title">{esc(r.title)}</div>',unsafe_allow_html=True)
+        icon_col.markdown(
+            f'<div class="record-icon">{GENRES.get(r.genre,"✨")}</div>',
+            unsafe_allow_html=True,
+        )
+        text_col.markdown(
+            f'<div class="record-title">{esc(r.title)}</div>',
+            unsafe_allow_html=True,
+        )
         if r.memo:
-            text_col.markdown(f'<div class="muted">{esc(r.memo)}</div>',unsafe_allow_html=True)
-        text_col.markdown(f'<div class="muted">{esc(r.member_name)} ・ {created}</div>',unsafe_allow_html=True)
-        amount_col.markdown(f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',unsafe_allow_html=True)
+            text_col.markdown(
+                f'<div class="muted record-memo">{esc(r.memo)}</div>',
+                unsafe_allow_html=True,
+            )
+        text_col.markdown(
+            f'<div class="muted record-meta">{esc(r.member_name)}<br>{created}</div>',
+            unsafe_allow_html=True,
+        )
+        amount_col.markdown(
+            f'<div class="amount" style="color:{dark}">+{money(r.amount)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # 下段は操作専用。レコード情報と重ならない。
         like_col, delete_col, spacer_col = st.columns(
-            [1.55, 0.85, 4.6], gap='xsmall', vertical_alignment='center', wrap=False
+            [1.55, 0.9, 4.85], gap='xsmall', vertical_alignment='center', wrap=False
         )
         liked=bool(r.is_liked)
         label=f'{"♥" if liked else "♡"} {int(r.like_count)}'
-        if like_col.button(label,key=f'{prefix}_like_{r.id}',type='primary' if liked else 'secondary',width='stretch'):
-            toggle_member_like(int(r.id),active_mid); st.rerun()
+        if like_col.button(
+            label,
+            key=f'{prefix}_like_{r.id}',
+            type='primary' if liked else 'secondary',
+            width='stretch',
+        ):
+            toggle_member_like(int(r.id),active_mid)
+            st.rerun()
         with delete_col.popover('🗑️', width='stretch'):
             st.caption('この記録を削除しますか？')
             if st.button('削除',key=f'{prefix}_del_{r.id}',type='primary',width='stretch'):
-                delete_saving(int(r.id)); st.rerun()
+                delete_saving(int(r.id))
+                st.rerun()
 
 
 init_db()
@@ -107,24 +137,23 @@ st.markdown(f'''<style>
 div[data-testid="stForm"]{{padding:10px 14px 12px}} div[data-testid="stForm"] [data-testid="stVerticalBlock"]{{gap:.45rem}}
 @media (max-width:640px){{
 .block-container{{padding-top:3.9rem;padding-left:.7rem;padding-right:.7rem}} .sticky{{top:3.55rem;padding:12px 14px}}
-.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.4rem;padding:8px 2px;min-width:34px}}
-.record-title{{font-size:.9rem}} .muted{{font-size:.68rem}} .amount{{font-size:.9rem}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
+.big{{font-size:1.75rem}} .pill{{padding:8px 10px;font-size:.8rem}} .record-icon{{font-size:1.45rem;padding:10px 3px;min-width:38px;min-height:40px}}
+.record-title{{font-size:.9rem;line-height:1.35}} .muted{{font-size:.69rem;line-height:1.35}} .record-meta{{padding-top:4px;padding-bottom:5px}} .amount{{font-size:.86rem;line-height:1.2;white-space:nowrap;word-break:keep-all;overflow:visible}} div[data-testid="stForm"]{{padding:8px 10px 10px}}
 div[data-testid="stForm"] [data-testid="stWidgetLabel"] p{{font-size:.76rem}}
 }}
 </style><div class="sticky"><div><small>今月</small><div class="big">{money(sumrow.month_total)}</div><small>浮いた！</small></div><div class="pill">本日 +{money(sumrow.today_total)}</div></div>''',unsafe_allow_html=True)
 active_mid=st.selectbox('現在のメンバー',ids,index=ids.index(st.session_state.active_member_id),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0],key='active_member_id')
 name=members.loc[members.id==active_mid,'name'].iloc[0]
-st.caption(f'現在のメンバー：{name}')
 home,history,settings=st.tabs(['🌱 直近の記録','🗓️ 月別の履歴','⚙️ 設定'])
 with home:
     with st.form('saving_form',clear_on_submit=True):
         c1,c2=st.columns(2, gap='xsmall', wrap=False); genre=c1.selectbox('ジャンル',list(GENRES),format_func=lambda x:f'{GENRES[x]} {x}'); recorder=c2.selectbox('記録したメンバー',ids,index=ids.index(active_mid),format_func=lambda x:members.loc[members.id==x,'name'].iloc[0])
-        title=st.text_input('節約したもの'); memo=st.text_area('メモ',height=68); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
+        title=st.text_input('節約したもの'); memo=st.text_input('メモ',placeholder='任意'); amount=st.number_input('いくら節約した？',min_value=1,max_value=10_000_000,value=None,step=100,placeholder='金額を入力')
         if st.form_submit_button('＋ 記録する',width='stretch'):
             if not title.strip():st.error('「節約したもの」を入力してね。')
             elif amount is None:st.error('節約した金額を入力してね。')
             else:add_saving(genre,title,memo,amount,recorder); st.rerun()
-    data=records(active_mid).head(8)
+    data=records(active_mid, recorder_mid=active_mid).head(8)
     if data.empty:st.info('まだ記録がありません。')
     for _,r in data.iterrows():render_record(r,dark,'recent',active_mid)
 with history:
